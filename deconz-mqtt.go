@@ -48,7 +48,7 @@ var (
 
 func init() {
 	flag.StringVar(&origin, "origin", "http://localhost/", "origin of WebSocket client")
-	flag.StringVar(&url, "url", "ws://raspbeegw.lan:443", "WebSocket server address to connect to")
+	flag.StringVar(&url, "url", "ws://raspbeegw.lan:8088", "WebSocket server address to connect to")
 	flag.StringVar(&protocol, "protocol", "", "WebSocket subprotocol")
 	flag.BoolVar(&insecureSkipVerify, "insecureSkipVerify", false, "Skip TLS certificate verification")
 	flag.BoolVar(&displayHelp, "help", false, "Display help information about wsd")
@@ -56,7 +56,7 @@ func init() {
 }
 
 func inLoop(ws *websocket.Conn, errors chan<- error, in chan<- []byte) {
-	var msg = make([]byte, 512)
+	var msg = make([]byte, 1024)
 
 	for {
 		var n int
@@ -81,19 +81,22 @@ func printErrors(errors <-chan error) {
 		} else {
 			fmt.Printf("\rerr %v\n> ", red(err))
 		}
+		os.Exit(-1)
 	}
 }
 
 func printReceivedMessages(in <-chan []byte) {
 	//mqtt.DEBUG = log.New(os.Stdout, "", 0)
-	mqtt.ERROR = log.New(os.Stdout, "", 0)
-	opts := mqtt.NewClientOptions().AddBroker("tcp://openhab.lan:1883").SetClientID("gotrivial")
+	mqtt.ERROR = log.New(os.Stdout, "bla:", 0)
+	//opts := mqtt.NewClientOptions().AddBroker("tcp://openhab.lan:1883").SetClientID("gotrivial")
+	opts := mqtt.NewClientOptions().AddBroker("tcp://openhab.lan:1883")
 	opts.SetKeepAlive(2 * time.Second)
 	//opts.SetDefaultPublishHandler(f)
 	opts.SetPingTimeout(1 * time.Second)
 
 	c := mqtt.NewClient(opts)
-	if token := c.Connect(); token.Wait() && token.Error() != nil {
+	token := c.Connect()
+	if token.Wait() && token.Error() != nil {
 		panic(token.Error())
 	}
 	fmt.Printf("received message\n")
@@ -101,6 +104,10 @@ func printReceivedMessages(in <-chan []byte) {
 		var f map[string]interface{}
 		var subject string
 		var text string
+		if token.Error() != nil {
+			panic(token.Error())
+		}
+		fmt.Printf("\r< %s\n", cyan(string(msg)))
 
 		err := json.Unmarshal(msg, &f)
 		if err != nil {
@@ -110,7 +117,8 @@ func printReceivedMessages(in <-chan []byte) {
 
 		resource := f["r"].(string)
 		if resource != "sensors" {
-			continue
+			fmt.Printf("\r not a sensor message - %v\n", red(resource))
+			//continue
 		}
 		fmt.Printf("\r\tresource type is %s\n ", green(string(resource)))
 
@@ -120,6 +128,9 @@ func printReceivedMessages(in <-chan []byte) {
 		id := f["id"].(string)
 		fmt.Printf("\r\tobject id is %s\n ", green(string(id)))
 
+		if f["state"] == nil {
+			continue
+		}
 
 		state := f["state"].(map[string]interface{})
 
@@ -130,20 +141,32 @@ func printReceivedMessages(in <-chan []byte) {
 			subject = fmt.Sprintf("deconz/button/%s/buttonevent", id)
 			text = fmt.Sprintf("%4.0f", buttonevent)
 		}
-
+		var publish bool
 		var presence bool
+		var temperature float64
 		if state["presence"] != nil {
 			presence = state["presence"].(bool)
 			fmt.Printf("\r\t\tpresence event is %s\n ", green(presence))
 			subject = fmt.Sprintf("deconz/sensor/%s/presence", id)
 			text = fmt.Sprintf("%t", presence)
+			publish = true
+		} else if state["temperature"] != nil {
+			temperature = state["temperature"].(float64) / 100
+			fmt.Printf("\r\t\ttemperature event is %s\n ", green(temperature))
+			subject = fmt.Sprintf("deconz/sensor/%s/temperature", id)
+			text = fmt.Sprintf("%f", temperature)
+			publish = true
+		} else {
+			publish = false
 		}
 		fmt.Printf("\r< %s\n", cyan(string(msg)))
 
 		//text := fmt.Sprintf("this is msg #%s!", resource)
-		fmt.Printf("\r\tpublish %s to %s\n", green(text), yellow(subject))
-		token := c.Publish(subject, 0, false, text)
-		token.Wait()
+		if publish == true {
+			fmt.Printf("\r\tpublish %s to %s\n", green(text), yellow(subject))
+			token := c.Publish(subject, 0, false, text)
+			token.Wait()
+		}
 	}
 }
 /*
@@ -168,15 +191,6 @@ func forwardMQTTMessage(in <-chan map[string]interface{}) {
 
 	}
 }*/
-
-func outLoop(ws *websocket.Conn, out <-chan []byte, errors chan<- error) {
-	for msg := range out {
-		_, err := ws.Write(msg)
-		if err != nil {
-			errors <- err
-		}
-	}
-}
 
 func dial(url, protocol, origin string) (ws *websocket.Conn, err error) {
 	config, err := websocket.NewConfig(url, origin)
