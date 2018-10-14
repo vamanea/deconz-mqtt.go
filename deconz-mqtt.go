@@ -144,6 +144,7 @@ func printReceivedMessages(in <-chan []byte) {
 		var publish bool
 		var presence bool
 		var temperature float64
+		var humidity float64
 		if state["presence"] != nil {
 			presence = state["presence"].(bool)
 			fmt.Printf("\r\t\tpresence event is %s\n ", green(presence))
@@ -155,6 +156,12 @@ func printReceivedMessages(in <-chan []byte) {
 			fmt.Printf("\r\t\ttemperature event is %s\n ", green(temperature))
 			subject = fmt.Sprintf("deconz/sensor/%s/temperature", id)
 			text = fmt.Sprintf("%f", temperature)
+			publish = true
+		} else if state["humidity"] != nil {
+			humidity = state["humidity"].(float64) / 100
+			fmt.Printf("\r\t\thumidity event is %s\n ", green(humidity))
+			subject = fmt.Sprintf("deconz/sensor/%s/humidity", id)
+			text = fmt.Sprintf("%f", humidity)
 			publish = true
 		} else {
 			publish = false
